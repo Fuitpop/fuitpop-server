@@ -7,7 +7,7 @@ const moment = require('moment');
 
 const PORT = 8320;
 const HOST = 'localhost';
-const DATA_DIRECTORY = path.join(__dirname, `../../core/data`);
+const DATA_DIRECTORY = path.join(__dirname, `../core/data`);
 
 const app = new Koa();
 const router = new KoaRouter();
