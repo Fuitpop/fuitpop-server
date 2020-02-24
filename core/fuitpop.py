@@ -15,7 +15,7 @@ secret = os.getenv('ACCESS_TOKEN_SECRET')
 
 # global vars
 queries = ['#F1']
-num_query_pages = 44
+num_query_pages = 10
 num_tweets_scanned = 0
 
 drivers = {}
@@ -25,6 +25,7 @@ driver_polarity = [0]
 
 now = datetime.datetime.now()
 cutoff_date = now - datetime.timedelta(days=1)
+failedRequest = 0
 
 
 # remove accents from input string
@@ -135,15 +136,15 @@ def scan_tweets(tweets):
     num_tweets_scanned += len(tweets)
 
 # get current drivers from Ergast API
-def get_drivers():
+def get_drivers(yr_offset):
     global drivers
-    data = ergast_json_request('http://ergast.com/api/f1/' + str(now.year) + '/drivers.json')
+    data = ergast_json_request('http://ergast.com/api/f1/' + str(now.year - yr_offset) + '/drivers.json')
     drivers = data['MRData']['DriverTable']['Drivers']
 
 # get current tracks and year calendar from Ergast API
-def get_tracks():
+def get_tracks(yr_offset):
     global tracks, queries
-    data = ergast_json_request('http://ergast.com/api/f1/' + str(now.year) + '.json')
+    data = ergast_json_request('http://ergast.com/api/f1/' + str(now.year - yr_offset) + '.json')
     tracks = data['MRData']['RaceTable']['Races']
 
     # append grand prix hashtags to queries
@@ -154,7 +155,7 @@ def get_tracks():
         queries.append(hashtag)
 
     # cache the API data for web use
-    with io.open('data/Calendar_' + str(now.year) + '.json', 'w',
+    with io.open('data/Calendar_' + str(now.year - yr_offset) + '.json', 'w',
                         encoding='utf8') as outfile:
         str_ = json.dumps(data, indent=4, separators=(',', ': '))
         outfile.write(str_)
@@ -168,6 +169,8 @@ def ergast_json_request(addr):
                 return json.loads(url.read().decode())
         except (urllib.request.HTTPError, urllib.request.URLError):
             pass
+    global failedRequest
+    failedRequest = 1
     return {}
 
 
@@ -230,6 +233,7 @@ def update_championship():
 
 
 def main():
+    yearOffset = 0
 
     # access the API
     auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
@@ -237,26 +241,35 @@ def main():
     api = tweepy.API(auth)
 
     # get the drivers to be searched, and race calendar for querying
-    get_drivers()
-    get_tracks()
+    get_drivers(yearOffset)
+    get_tracks(yearOffset)
 
     global driver_tally, driver_polarity
     driver_tally = [0] * len(drivers)
     driver_polarity = [0.5] * len(drivers)      # start with neutral polarity
 
-    if len(drivers) == 0 or len(tracks) == 0:
-        print('Ergast API did not return any data.')
-        return      # empty API data, so do nothing
+    if failedRequest:
+        print('Ergast API is currently down.')
+        return 
+
+    if len(drivers) == 0 or len(tracks):    # if the data for this year is unavailable
+        print('Ergast API did not return any data. Trying again with a year offset...')
+        yearOffset += 1
+        get_drivers(yearOffset)
+        get_tracks(yearOffset)
+    
+    print(drivers)
 
     # run the search queries
     print('Scanning tweets...')
     query = ' OR '.join(queries)  # OR operator for tags
     for page in tweepy.Cursor(api.search, q=query, count=100, result_type='recent').pages(num_query_pages):
         scan_tweets(page)
-
+    
     save_tally()
-    update_championship()
     print(num_tweets_scanned, 'tweets have been scanned.')
+    if yearOffset == 0:  # no championship with a year offset 
+        update_championship()
 
     # update twitter status
     try:
